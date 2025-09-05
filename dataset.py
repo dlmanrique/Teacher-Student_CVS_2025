@@ -10,20 +10,25 @@ class SwinDataset():
     def __init__(self, fold, split):
         self.json_file = json.load(open(f'data/Fold{fold}/{split}.json'))
         self.images_info = self.json_file['annotations']
-        self.transforms = get_transform_sequence(256)
+        self.transforms_student = get_transform_sequence(256)
+        self.transforms_teacher = get_transform_sequence(384)
+
         self.images_path = 'Dataset/frames'
     def __len__(self):
         return len(self.images_info)
 
     def __getitem__(self, idx):
-        
+
         img_info = self.images_info[idx]
         annot = torch.tensor(img_info['cvs'], dtype=torch.float32)
         image = Image.open(os.path.join(self.images_path, img_info['image_name']))
-        if self.transforms:
-            image = self.transforms(image)
-            image = (image-torch.min(image)) / (-torch.min(image)+torch.max(image)) #Normalize the image in the interval (0,1)
-        return image, annot, img_info['image_name']
+        image_student = self.transforms_student(image)
+        image_student = (image_student-torch.min(image_student)) / (-torch.min(image_student)+torch.max(image_student)) #Normalize the image in the interval (0,1)
+
+        image_teacher = self.transforms_teacher(image)
+        image_teacher = (image_teacher-torch.min(image_teacher)) / (-torch.min(image_teacher)+torch.max(image_teacher)) #Normalize the image in the interval (0,1)
+
+        return image_student, annot, image_teacher, img_info['image_name'], 
 
 
 def get_dataloader(train_dataset, val_dataset, batch):

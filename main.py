@@ -8,8 +8,9 @@ from datetime import datetime
 import os, random, numpy as np
 
 
-from model import build_swinv2
+from model import build_swinv2, build_teacher
 from dataset import SwinDataset, get_dataloader
+from loss import DistillationLoss
 from evaluation import get_map
 
 torch.set_num_threads(1)
@@ -31,8 +32,8 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
     model.train()
     total_loss = 0.0
 
-    print('Trining ....')
-    for imgs, labels, _ in tqdm(dataloader):
+    print('Training ....')
+    for imgs, labels, _, _ in tqdm(dataloader):
         imgs, labels = imgs.to(device), labels.float().to(device)
 
         optimizer.zero_grad()
@@ -47,6 +48,51 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
     return avg_loss
 
 
+def train_teacher_student(model, teacher, dataloader, device, args):
+    model.train()
+    teacher.eval()
+
+    # class weights y loss function
+    class_weights = torch.tensor([[3.19852941, 4.46153846, 2.79518072]]).to(device)
+    criterion = DistillationLoss(class_weights, T=args.T, alpha=args.alpha, device=device)
+
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    print('Training teacher-student ....')
+    total_loss = 0.0
+
+    for imgs_student, labels, imgs_teacher, _ in tqdm(dataloader):
+        imgs_student = imgs_student.to(device)
+        imgs_teacher = imgs_teacher.to(device)
+        labels = labels.float().to(device)
+
+        # forward teacher (sin gradiente)
+        with torch.no_grad():
+            teacher_logits = teacher(imgs_teacher)
+
+        # forward student
+        student_logits = model(imgs_student)
+
+        # loss
+        loss = criterion(student_logits, teacher_logits, labels)
+
+        # backward
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    avg_loss = total_loss / len(dataloader)
+    print(f"Train Loss: {avg_loss:.4f}")
+
+    return avg_loss
+
+
+
+
+
+
 def evaluate(model, dataloader, criterion, device):
     model.eval()
     val_running_loss = 0.0
@@ -56,7 +102,7 @@ def evaluate(model, dataloader, criterion, device):
 
     print('Eval ....')
     with torch.no_grad():
-        for imgs, labels, _ in tqdm(dataloader):
+        for imgs, labels, _, _ in tqdm(dataloader):
             imgs, labels = imgs.to(device), labels.float().to(device)
 
             outputs = model(imgs)
@@ -84,6 +130,7 @@ def evaluate(model, dataloader, criterion, device):
 
 
 
+
 if __name__ == '__main__':
 
 
@@ -94,6 +141,9 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=64) # Ideal: 16
     parser.add_argument('--training_type', type=str, default='Base', choices=['Base', 'Teacher-Student'])
     parser.add_argument('--model_name', type=str, default='swinv2_base_window8_256', choices=['swinv2_base_window8_256', 'swinv2_small_window16_256'])
+    parser.add_argument('--teacher_path', type=str, default='weights/Sages_Fold2_bestMAP.pt')
+    parser.add_argument('--alpha', type=float, default=0.5)
+    parser.add_argument('--T', type=float, default=2)
     args = parser.parse_args()
     
     # Wandb log
@@ -127,9 +177,12 @@ if __name__ == '__main__':
     for epoch in range(args.epochs):
         print(f'Epoch [{epoch}/{args.epochs}]')
         if args.training_type == 'Base':
-            train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
-        elif args.training_type == 'Teacher-student':
-            pass
+            train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, args)
+        elif args.training_type == 'Teacher-Student':
+            # Load teacher model
+            teacher = build_teacher(args.teacher_path)
+            teacher.to('cuda')
+            train_loss = train_teacher_student(model, teacher, train_loader, device, args)
         val_loss, C1_ap, C2_ap, C3_ap, mAP = evaluate(model, val_loader, criterion, device)
 
         print(f"Época {epoch+1}: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}, Val mAP={mAP:.4f}")
