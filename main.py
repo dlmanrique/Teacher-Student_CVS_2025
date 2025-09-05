@@ -137,7 +137,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run SwinCVS with specified config")
     parser.add_argument('--fold', type=int, default=2, required=False)
     parser.add_argument('--lr', type=float, default=0.00000464158883) # IdeaL: 0.00000464158883
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=8)
     parser.add_argument('--batch_size', type=int, default=64) # Ideal: 16
     parser.add_argument('--training_type', type=str, default='Base', choices=['Base', 'Teacher-Student'])
     parser.add_argument('--model_name', type=str, default='swinv2_base_window8_256', choices=['swinv2_base_window8_256', 'swinv2_small_window16_256'])
